@@ -67,15 +67,32 @@ function unserialize (data) {
       return [buf.length, buf.join('')];
     },
     read_chrs = function (data, offset, length) {
-      var i, chr, buf;
+      var i, chr, buf, escaped = false;
 
       buf = [];
       for (i = 0; i < length; i++) {
         chr = data.slice(offset + (i - 1), offset + i);
-        buf.push(chr);
+        if (chr == "\\" && !escaped) {
+           escaped = true;
+           length += 1;
+           continue;
+        }
+        if (escaped) {
+            if (chr == 0) {
+                buf.push("\0");
+            }
+            else {
+                throw new Error("cannot escape \\" + chr);
+            }
+        }
+        else {
+            buf.push(chr);
+        }
+        escaped = false;
         length -= utf8Overhead(chr);
       }
-      return [buf.length, buf.join('')];
+      // return the length skipped rather than the length returned.
+      return [length, buf.join('')];
     },
     _unserialize = function (data, offset) {
       var dtype, dataoffset, keyandchrs, keys,
@@ -124,6 +141,10 @@ function unserialize (data) {
         case 'n':
           readdata = null;
           break;
+        case 'O':
+        case 'o':
+          // O is only different from a that O has a class name.
+          // and maybe O's keys are all strings
         case 's':
           ccount = read_until(data, dataoffset, ':');
           chrs = ccount[0];
@@ -134,12 +155,19 @@ function unserialize (data) {
           chrs = readData[0];
           readdata = readData[1];
           dataoffset += chrs + 2;
-          if (chrs != parseInt(stringlength, 10) && chrs != readdata.length) {
+          if (parseInt(stringlength, 10) != readdata.length) {
             error('SyntaxError', 'String length mismatch');
           }
-          break;
+          if (dtype == 's')
+              break;
+          else {
+              readdata = {
+                  __type: readdata,
+              };
+          }
         case 'a':
-          readdata = {};
+          if (dtype == 'a')
+              readdata = {};
 
           keyandchrs = read_until(data, dataoffset, ':');
           chrs = keyandchrs[0];
